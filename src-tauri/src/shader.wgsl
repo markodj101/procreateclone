@@ -1,6 +1,8 @@
 struct Resolution {
     width: f32,
     height: f32,
+    zoom: f32,
+    _padding: f32,
 }
 
 @group(0) @binding(0) var<uniform> res: Resolution;
@@ -16,9 +18,14 @@ struct VertexOutput {
 }
 
 fn to_clip(pos: vec2<f32>) -> vec4<f32> {
-    let x = (pos.x / res.width) * 2.0 - 1.0;
-    let y = 1.0 - (pos.y / res.height) * 2.0;
-    return vec4<f32>(x, y, 0.0, 1.0);
+    let normalized = vec2<f32>(pos.x / res.width,
+                               pos.y / res.height
+                               );
+    let centered = (normalized - 0.5) * res.zoom + 0.5;
+
+    let x = centered.x * 2.0-1.0;
+    let y = 1.0 - centered.y * 2.0;
+    return vec4<f32>(x,y,0.0,1.0);
 }
 
 @vertex

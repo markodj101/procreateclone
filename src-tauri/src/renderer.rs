@@ -1,4 +1,5 @@
 use crate::canvas::{Canvas, Vertex};
+use std::sync::{Arc, Mutex};
 use tauri::WebviewWindow;
 use wgpu::util::DeviceExt;
 
@@ -8,6 +9,7 @@ pub struct Renderer {
     pub queue: wgpu::Queue,
     pub config: wgpu::SurfaceConfiguration,
     pub scale_factor: f64,
+    pub zoom: Arc<Mutex<f32>>, // može biti private
     pipeline: wgpu::RenderPipeline,
     cursor_pipeline: wgpu::RenderPipeline,
     resolution_buffer: wgpu::Buffer,
@@ -15,7 +17,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub async fn new(window: &WebviewWindow) -> Self {
+    pub async fn new(window: &WebviewWindow, zoom: Arc<Mutex<f32>>) -> Self {
         let size = window.inner_size().unwrap();
         let scale_factor = window.scale_factor().unwrap_or(1.0);
         let instance = wgpu::Instance::default();
@@ -45,8 +47,16 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
-        // Resolution uniform buffer
-        let resolution_data: [f32; 2] = [size.width as f32, size.height as f32];
+        // Uzmi početni zoom iz mutexa
+        let initial_zoom = *zoom.lock().unwrap();
+
+        // Uniformni bafer sa 4 vrednosti
+        let resolution_data: [f32; 4] = [
+            size.width as f32,
+            size.height as f32,
+            initial_zoom,
+            0.0, // padding
+        ];
         let resolution_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("resolution"),
             contents: bytemuck::cast_slice(&resolution_data),
@@ -81,7 +91,6 @@ impl Renderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
 
-        // ✅ Fix 1: immediate_size replaces push_constant_ranges
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
             bind_group_layouts: &[&bind_group_layout],
@@ -119,7 +128,7 @@ impl Renderer {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None, // ✅ Fix 2
+            multiview_mask: None,
             cache: None,
         });
 
@@ -148,7 +157,7 @@ impl Renderer {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None, // ✅ Fix 2
+            multiview_mask: None,
             cache: None,
         });
 
@@ -158,6 +167,7 @@ impl Renderer {
             queue,
             config,
             scale_factor,
+            zoom, // ← sada dodeljujemo
             pipeline,
             cursor_pipeline,
             resolution_buffer,
@@ -165,21 +175,32 @@ impl Renderer {
         }
     }
 
+    // Nova pomoćna metoda za ažuriranje uniformnog bafera
+    fn update_uniform_buffer(&self) {
+        let zoom_val = *self.zoom.lock().unwrap();
+        let data: [f32; 4] = [
+            self.config.width as f32,
+            self.config.height as f32,
+            zoom_val,
+            0.0,
+        ];
+        self.queue
+            .write_buffer(&self.resolution_buffer, 0, bytemuck::cast_slice(&data));
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
-            let resolution_data: [f32; 2] = [width as f32, height as f32];
-            self.queue.write_buffer(
-                &self.resolution_buffer,
-                0,
-                bytemuck::cast_slice(&resolution_data),
-            );
+            self.update_uniform_buffer(); // ← ažuriramo celu uniformu
         }
     }
 
     pub fn render(&self, canvas: &Canvas) -> Result<(), wgpu::SurfaceError> {
+        // Pre svakog renderovanja osvežimo uniformu
+        self.update_uniform_buffer();
+
         let output = self.surface.get_current_texture()?;
         let view = output.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());

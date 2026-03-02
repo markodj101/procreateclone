@@ -16,10 +16,23 @@
     await invoke("clear_canvas");
   }
 
+  // NOVO: funkcije za zumiranje
+  async function zoomIn() {
+    await invoke("zoom_in");
+  }
+
+  async function zoomOut() {
+    await invoke("zoom_out");
+  }
+
+  async function zoomReset() {
+    await invoke("set_zoom", { value: 1.0 });
+  }
+
   const colors = ["#000000", "#ef4444", "#3b82f6", "#22c55e", "#f59e0b"];
 
   onMount(() => {
-    // ✅ Samo govori Tauriju da je frontend spreman — nema mouse listenera
+    // Samo govori Tauriju da je frontend spreman
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         invoke("frontend_ready");
@@ -28,7 +41,6 @@
   });
 </script>
 
-<!-- Nema canvas-capture diva, nema mouse event listenera -->
 <div class="toolbar">
   <span class="title">Draw</span>
 
@@ -53,6 +65,13 @@
     }}
   />
 
+  <!-- NOVO: dugmad za zumiranje -->
+  <div class="zoom-group">
+    <button class="zoom-btn" on:click={zoomIn} title="Zoom In (10%)">+</button>
+    <button class="zoom-btn" on:click={zoomOut} title="Zoom Out (10%)">−</button>
+    <button class="zoom-btn" on:click={zoomReset} title="Reset Zoom to 100%">1:1</button>
+  </div>
+
   <button class="erase-btn" on:click={clearCanvas}>
     🗑 Erase All
   </button>
@@ -65,7 +84,7 @@
     left: 50%;
     transform: translateX(-50%);
     z-index: 999;
-     background: rgba(255, 255, 255, 1);
+    background: rgba(255, 255, 255, 1);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(255, 255, 255, 0.3);
@@ -99,6 +118,33 @@
     border-color: white;
     transform: scale(1.2);
     box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.3);
+  }
+
+  /* NOVO: grupa za zoom dugmad */
+  .zoom-group {
+    display: flex;
+    gap: 4px;
+    margin-left: 4px;
+    border-left: 1px solid rgba(0,0,0,0.1);
+    padding-left: 8px;
+  }
+
+  .zoom-btn {
+    background: rgba(59, 130, 246, 0.1);
+    color: #3b82f6;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+    min-width: 32px;
+    text-align: center;
+  }
+
+  .zoom-btn:hover {
+    background: rgba(59, 130, 246, 0.2);
   }
 
   .erase-btn {
