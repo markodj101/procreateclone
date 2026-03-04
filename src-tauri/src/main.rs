@@ -7,6 +7,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::Manager;
 
+struct TargetZoom(Arc<Mutex<f32>>);
+struct TargetRotation(Arc<Mutex<f32>>);
+struct CurrentRotation(Arc<Mutex<f32>>);
+
 #[tauri::command]
 fn frontend_ready(window: tauri::WebviewWindow) {
     window.show().unwrap();
@@ -32,40 +36,60 @@ fn set_pen_size(size: f32, state: tauri::State<'_, Arc<Mutex<Canvas>>>) {
     state.lock().unwrap().pen_size = size;
 }
 
-// Komande samo postavljaju TARGET — animacioni thread radi ostalo
 #[tauri::command]
-fn zoom_in(target_zoom: tauri::State<'_, Arc<Mutex<f32>>>) {
-    let mut t = target_zoom.lock().unwrap();
-    *t *= 1.2;
-    println!("Target zoom in: {}", *t);
+fn zoom_in(state: tauri::State<'_, TargetZoom>) {
+    *state.0.lock().unwrap() *= 1.2;
 }
 
 #[tauri::command]
-fn zoom_out(target_zoom: tauri::State<'_, Arc<Mutex<f32>>>) {
-    let mut t = target_zoom.lock().unwrap();
-    *t /= 1.2;
-    println!("Target zoom out: {}", *t);
+fn zoom_out(state: tauri::State<'_, TargetZoom>) {
+    *state.0.lock().unwrap() /= 1.2;
 }
 
 #[tauri::command]
-fn set_zoom(value: f32, target_zoom: tauri::State<'_, Arc<Mutex<f32>>>) {
-    let mut t = target_zoom.lock().unwrap();
-    *t = value;
-    println!("Target zoom set: {}", *t);
+fn set_zoom(value: f32, state: tauri::State<'_, TargetZoom>) {
+    *state.0.lock().unwrap() = value;
+}
+
+#[tauri::command]
+fn rotate_cw(state: tauri::State<'_, TargetRotation>) {
+    *state.0.lock().unwrap() += std::f32::consts::PI / 12.0;
+}
+
+#[tauri::command]
+fn rotate_ccw(state: tauri::State<'_, TargetRotation>) {
+    *state.0.lock().unwrap() -= std::f32::consts::PI / 12.0;
+}
+
+#[tauri::command]
+fn set_rotation(
+    _value: f32,
+    target: tauri::State<'_, TargetRotation>,
+    current: tauri::State<'_, CurrentRotation>,
+) {
+    let tau = std::f32::consts::TAU;
+    let cur = *current.0.lock().unwrap();
+
+    // normalizuj na [-π, π] da animacija ide najkraćim putem
+    let normalized = cur - tau * (cur / tau).round();
+
+    *current.0.lock().unwrap() = normalized;
+    *target.0.lock().unwrap() = 0.0;
 }
 
 fn main() {
     let canvas = Arc::new(Mutex::new(Canvas::new()));
 
-    // Trenutni zoom koji renderer koristi
     let zoom = Arc::new(Mutex::new(1.0f32));
-
-    // Ciljani zoom — komande menjaju samo ovo
     let target_zoom = Arc::new(Mutex::new(1.0f32));
+    let rotation = Arc::new(Mutex::new(0.0f32));
+    let target_rotation = Arc::new(Mutex::new(0.0f32));
 
     tauri::Builder::default()
         .manage(canvas.clone())
-        .manage(target_zoom.clone()) // ← upravljamo target_zoom-om
+        .manage(TargetZoom(target_zoom.clone()))
+        .manage(TargetRotation(target_rotation.clone()))
+        .manage(CurrentRotation(rotation.clone()))
         .invoke_handler(tauri::generate_handler![
             clear_canvas,
             set_color,
@@ -74,14 +98,17 @@ fn main() {
             zoom_in,
             zoom_out,
             set_zoom,
+            rotate_cw,
+            rotate_ccw,
+            set_rotation,
         ])
         .setup(move |app| {
             let window = app.get_webview_window("main").unwrap();
 
             let scale_factor = window.scale_factor().unwrap_or(1.0) as f32;
-            println!("Scale factor: {}", scale_factor);
 
-            let renderer = pollster::block_on(Renderer::new(&window, zoom.clone()));
+            let renderer =
+                pollster::block_on(Renderer::new(&window, zoom.clone(), rotation.clone()));
             let c = canvas.lock().unwrap();
             renderer.render(&c).unwrap_or_default();
             drop(c);
@@ -109,40 +136,39 @@ fn main() {
             });
 
             // ── Animacioni thread ──────────────────────────────────────────
-            // Radi na ~60fps, interpolira zoom → target_zoom sa ease-out
             {
                 let zoom_anim = zoom.clone();
                 let target_anim = target_zoom.clone();
+                let rotation_anim = rotation.clone();
+                let target_anim_r = target_rotation.clone();
                 let renderer_anim = renderer.clone();
                 let canvas_anim = canvas.clone();
 
-                std::thread::spawn(move || {
-                    loop {
-                        std::thread::sleep(Duration::from_millis(16)); // ~60fps
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(Duration::from_millis(16));
 
-                        let target = *target_anim.lock().unwrap();
-                        let current = *zoom_anim.lock().unwrap();
+                    let target_z = *target_anim.lock().unwrap();
+                    let current_z = *zoom_anim.lock().unwrap();
+                    let diff_z = target_z - current_z;
 
-                        let diff = target - current;
+                    let target_r = *target_anim_r.lock().unwrap();
+                    let current_r = *rotation_anim.lock().unwrap();
+                    let diff_r = target_r - current_r;
 
-                        // Ako smo dovoljno blizu — zaustavljamo animaciju
-                        if diff.abs() < 0.0005 {
-                            if (current - target).abs() > 0.00001 {
-                                *zoom_anim.lock().unwrap() = target;
-                                let c = canvas_anim.lock().unwrap();
-                                renderer_anim.lock().unwrap().render(&c).unwrap_or_default();
-                            }
-                            continue;
-                        }
-
-                        // Ease-out: pomeri 18% razlike svaki frame
-                        // Što bliže cilju — sporije se kreće → prirodan ease-out
-                        let new_zoom = current + diff * 0.18;
-                        *zoom_anim.lock().unwrap() = new_zoom;
-
-                        let c = canvas_anim.lock().unwrap();
-                        renderer_anim.lock().unwrap().render(&c).unwrap_or_default();
+                    if diff_z.abs() < 0.0005 && diff_r.abs() < 0.0001 {
+                        continue;
                     }
+
+                    if diff_z.abs() >= 0.0005 {
+                        *zoom_anim.lock().unwrap() = current_z + diff_z * 0.18;
+                    }
+
+                    if diff_r.abs() >= 0.0001 {
+                        *rotation_anim.lock().unwrap() = current_r + diff_r * 0.18;
+                    }
+
+                    let c = canvas_anim.lock().unwrap();
+                    renderer_anim.lock().unwrap().render(&c).unwrap_or_default();
                 });
             }
             // ──────────────────────────────────────────────────────────────
@@ -169,20 +195,28 @@ fn main() {
                             return;
                         }
 
-                        // Inverzna shader transformacija (zoom od centra)
-                        let (zoom, w, h) = {
+                        let (zoom, rot, w, h) = {
                             let r = renderer_mouse.lock().unwrap();
-                            let vals = (
-                                *r.zoom.lock().unwrap(),
-                                r.config.width as f32,
-                                r.config.height as f32,
-                            );
-                            vals
+                            let zoom_guard = r.zoom.lock().unwrap();
+                            let rot_guard = r.rotation.lock().unwrap();
+                            let zoom = *zoom_guard;
+                            let rot = *rot_guard;
+                            let w = r.config.width as f32;
+                            let h = r.config.height as f32;
+                            (zoom, rot, w, h)
                         };
-                        let cx = w / 2.0;
-                        let cy = h / 2.0;
-                        let canvas_x = (local_x - cx) / zoom + cx;
-                        let canvas_y = (local_y - cy) / zoom + cy;
+
+                        let aspect = w / h;
+
+                        let nx = (local_x / w - 0.5) * aspect;
+                        let ny = local_y / h - 0.5;
+
+                        let (s, c) = (rot.sin(), rot.cos());
+                        let un_rot_x = nx * c + ny * s;
+                        let un_rot_y = -nx * s + ny * c;
+
+                        let canvas_x = (un_rot_x / aspect / zoom + 0.5) * w;
+                        let canvas_y = (un_rot_y / zoom + 0.5) * h;
 
                         {
                             let mut c = canvas_mouse.lock().unwrap();

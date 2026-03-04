@@ -2,7 +2,7 @@ struct Resolution {
     width: f32,
     height: f32,
     zoom: f32,
-    _padding: f32,
+    rotation: f32,
 }
 
 @group(0) @binding(0) var<uniform> res: Resolution;
@@ -18,14 +18,24 @@ struct VertexOutput {
 }
 
 fn to_clip(pos: vec2<f32>) -> vec4<f32> {
-    let normalized = vec2<f32>(pos.x / res.width,
-                               pos.y / res.height
-                               );
-    let centered = (normalized - 0.5) * res.zoom + 0.5;
+    let aspect = res.width / res.height;
 
-    let x = centered.x * 2.0-1.0;
-    let y = 1.0 - centered.y * 2.0;
-    return vec4<f32>(x,y,0.0,1.0);
+    var nx = pos.x / res.width  - 0.5;
+    var ny = pos.y / res.height - 0.5;
+
+    // ispravi aspect ratio PRIJE rotacije
+    nx = nx * aspect;
+
+    let c = cos(res.rotation);
+    let s = sin(res.rotation);
+    let rx = nx * c - ny * s;
+    let ry = nx * s + ny * c;
+
+    // vrati aspect ratio NAKON rotacije
+    let fx = (rx / aspect) * res.zoom + 0.5;
+    let fy =  ry            * res.zoom + 0.5;
+
+    return vec4<f32>(fx * 2.0 - 1.0, 1.0 - fy * 2.0, 0.0, 1.0);
 }
 
 @vertex

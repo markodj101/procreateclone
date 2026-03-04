@@ -29,6 +29,10 @@
     await invoke("set_zoom", { value: 1.0 });
   }
 
+  async function rotateCW()  { await invoke("rotate_cw"); }
+async function rotateCCW() { await invoke("rotate_ccw"); }
+async function rotateReset(){ await invoke("set_rotation", { value: 0.0 }); }
+
   const colors = ["#000000", "#ef4444", "#3b82f6", "#22c55e", "#f59e0b"];
 
   onMount(() => {
@@ -65,13 +69,19 @@
     }}
   />
 
-  <!-- NOVO: dugmad za zumiranje -->
   <div class="zoom-group">
-    <button class="zoom-btn" on:click={zoomIn} title="Zoom In (10%)">+</button>
-    <button class="zoom-btn" on:click={zoomOut} title="Zoom Out (10%)">−</button>
-    <button class="zoom-btn" on:click={zoomReset} title="Reset Zoom to 100%">1:1</button>
-  </div>
+  <!-- existing zoom buttons -->
+  <button class="zoom-btn" on:click={zoomIn}>+</button>
+  <button class="zoom-btn" on:click={zoomOut}>−</button>
+  <button class="zoom-btn" on:click={zoomReset}>1:1</button>
+</div>
 
+<!-- NEW: rotation group -->
+<div class="zoom-group">
+  <button class="zoom-btn" on:click={rotateCCW} title="Rotate Left">↺</button>
+  <button class="zoom-btn" on:click={rotateCW}  title="Rotate Right">↻</button>
+  <button class="zoom-btn" on:click={rotateReset} title="Reset Rotation">0°</button>
+</div>
   <button class="erase-btn" on:click={clearCanvas}>
     🗑 Erase All
   </button>

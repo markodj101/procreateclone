@@ -10,6 +10,7 @@ pub struct Renderer {
     pub config: wgpu::SurfaceConfiguration,
     pub scale_factor: f64,
     pub zoom: Arc<Mutex<f32>>, // može biti private
+    pub rotation: Arc<Mutex<f32>>,
     pipeline: wgpu::RenderPipeline,
     cursor_pipeline: wgpu::RenderPipeline,
     resolution_buffer: wgpu::Buffer,
@@ -17,7 +18,11 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub async fn new(window: &WebviewWindow, zoom: Arc<Mutex<f32>>) -> Self {
+    pub async fn new(
+        window: &WebviewWindow,
+        zoom: Arc<Mutex<f32>>,
+        rotation: Arc<Mutex<f32>>,
+    ) -> Self {
         let size = window.inner_size().unwrap();
         let scale_factor = window.scale_factor().unwrap_or(1.0);
         let instance = wgpu::Instance::default();
@@ -168,6 +173,7 @@ impl Renderer {
             config,
             scale_factor,
             zoom, // ← sada dodeljujemo
+            rotation,
             pipeline,
             cursor_pipeline,
             resolution_buffer,
@@ -178,11 +184,12 @@ impl Renderer {
     // Nova pomoćna metoda za ažuriranje uniformnog bafera
     fn update_uniform_buffer(&self) {
         let zoom_val = *self.zoom.lock().unwrap();
+        let rotation_val = *self.rotation.lock().unwrap();
         let data: [f32; 4] = [
             self.config.width as f32,
             self.config.height as f32,
             zoom_val,
-            0.0,
+            rotation_val,
         ];
         self.queue
             .write_buffer(&self.resolution_buffer, 0, bytemuck::cast_slice(&data));
